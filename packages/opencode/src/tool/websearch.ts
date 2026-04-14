@@ -1,6 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { NetworkPolicy } from "../security/network"
 import { Tool } from "./tool"
 import * as McpExa from "./mcp-exa"
 import DESCRIPTION from "./websearch.txt"
@@ -28,6 +29,7 @@ export const WebSearchTool = Tool.define(
   "websearch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+    const configSvc = yield* NetworkPolicy.ConfigTag
 
     return {
       get description() {
@@ -36,6 +38,9 @@ export const WebSearchTool = Tool.define(
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const cfg = yield* configSvc.get()
+          yield* NetworkPolicy.checkAccess("https://mcp.exa.ai/mcp", cfg.network)
+
           yield* ctx.ask({
             permission: "websearch",
             patterns: [params.query],
@@ -68,7 +73,7 @@ export const WebSearchTool = Tool.define(
             title: `Web search: ${params.query}`,
             metadata: {},
           }
-        }).pipe(Effect.orDie),
+        }).pipe(Effect.provideService(NetworkPolicy.ConfigTag, configSvc), Effect.orDie) as Effect.Effect<any, never, never>,
     }
   }),
 )

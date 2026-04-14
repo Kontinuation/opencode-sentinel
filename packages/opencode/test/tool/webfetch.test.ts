@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "../../src/tool/truncate"
 import { Instance } from "../../src/project/instance"
 import { WebFetchTool } from "../../src/tool/webfetch"
+import { NetworkPolicy } from "../../src/security/network"
 import { SessionID, MessageID } from "../../src/session/schema"
 
 const projectRoot = path.join(import.meta.dir, "../..")
@@ -26,11 +27,35 @@ async function withFetch(fetch: (req: Request) => Response | Promise<Response>, 
   await fn(server.url)
 }
 
+
+
+const configMock = Layer.succeed(NetworkPolicy.ConfigTag, {
+  get: () =>
+    Effect.succeed({
+      network: { policy: "allow-all" as const, whitelist: [], proxy: undefined },
+    } as any),
+  getGlobal: () => Effect.succeed({} as any),
+  getConsoleState: () => Effect.succeed({} as any),
+  installDependencies: () => Effect.void,
+  update: () => Effect.void,
+  updateGlobal: (c: any) => Effect.succeed(c),
+  invalidate: () => Effect.void,
+  directories: () => Effect.succeed([]),
+  waitForDependencies: () => Effect.void,
+})
+
 function exec(args: { url: string; format: "text" | "markdown" | "html" }) {
   return WebFetchTool.pipe(
     Effect.flatMap((info) => info.init()),
     Effect.flatMap((tool) => tool.execute(args, ctx)),
-    Effect.provide(Layer.mergeAll(FetchHttpClient.layer, Truncate.defaultLayer, Agent.defaultLayer)),
+    Effect.provide(
+      Layer.mergeAll(
+        FetchHttpClient.layer,
+        Truncate.defaultLayer,
+        Agent.defaultLayer,
+        configMock,
+      ),
+    ),
     Effect.runPromise,
   )
 }
