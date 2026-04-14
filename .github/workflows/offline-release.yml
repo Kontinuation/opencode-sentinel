@@ -1,0 +1,42 @@
+name: Offline Release
+
+on:
+  workflow_dispatch: # Manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Build Offline Package
+        run: OPENCODE_CHANNEL=latest bun offline-scripts/pack.ts
+
+      - name: Create Release and Upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_NAME="$(date +'%Y%m%d')-$(git rev-parse --short=6 HEAD)"
+          echo "Creating release $RELEASE_NAME"
+          
+          # Create release and upload the artifact in one command
+          gh release create "$RELEASE_NAME" \
+            offline-scripts/opencode-offline.tar.gz \
+            --title "$RELEASE_NAME" \
+            --target dev \
+            --generate-notes
