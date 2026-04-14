@@ -1,6 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { NetworkPolicy } from "../security/network"
 import { Tool } from "./tool"
 import * as McpExa from "./mcp-exa"
 import DESCRIPTION from "./codesearch.txt"
@@ -9,6 +10,7 @@ export const CodeSearchTool = Tool.define(
   "codesearch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+    const configSvc = yield* NetworkPolicy.ConfigTag
 
     return {
       description: DESCRIPTION,
@@ -29,6 +31,9 @@ export const CodeSearchTool = Tool.define(
       }),
       execute: (params: { query: string; tokensNum: number }, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const cfg = yield* configSvc.get()
+          yield* NetworkPolicy.checkAccess("https://mcp.exa.ai/mcp", cfg.network)
+
           yield* ctx.ask({
             permission: "codesearch",
             patterns: [params.query],
@@ -57,7 +62,7 @@ export const CodeSearchTool = Tool.define(
             title: `Code search: ${params.query}`,
             metadata: {},
           }
-        }).pipe(Effect.orDie),
+        }).pipe(Effect.provideService(NetworkPolicy.ConfigTag, configSvc), Effect.orDie) as Effect.Effect<any, never, never>,
     }
   }),
 )

@@ -1,6 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { NetworkPolicy } from "../security/network"
 import { Tool } from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
@@ -22,6 +23,7 @@ export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+    const configSvc = yield* NetworkPolicy.ConfigTag
     const httpOk = HttpClient.filterStatusOk(http)
 
     return {
@@ -32,6 +34,9 @@ export const WebFetchTool = Tool.define(
           if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
             throw new Error("URL must start with http:// or https://")
           }
+
+          const cfg = yield* configSvc.get()
+          yield* NetworkPolicy.checkAccess(params.url, cfg.network)
 
           yield* ctx.ask({
             permission: "webfetch",
@@ -151,7 +156,7 @@ export const WebFetchTool = Tool.define(
             default:
               return { output: content, title, metadata: {} }
           }
-        }).pipe(Effect.orDie),
+        }).pipe(Effect.provideService(NetworkPolicy.ConfigTag, configSvc), Effect.orDie) as Effect.Effect<any, never, never>,
     }
   }),
 )
