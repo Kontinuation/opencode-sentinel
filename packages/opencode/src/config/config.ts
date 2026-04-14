@@ -909,6 +909,7 @@ export namespace Config {
       small_model: ModelId.describe(
         "Small model to use for tasks like title generation in the format of provider/model",
       ).optional(),
+      fallback_model: ModelId.optional().describe("Fallback model to use if the primary model fails"),
       default_agent: z
         .string()
         .optional()
@@ -1053,6 +1054,14 @@ export namespace Config {
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
         })
         .optional(),
+      network: z
+        .object({
+          policy: z.enum(["allow-all", "deny-all", "whitelist"]).default("deny-all").describe("Network access policy"),
+          whitelist: z.array(z.string()).default([]).describe("List of allowed domains for whitelist policy"),
+          proxy: z.string().optional().describe("Proxy URL for network requests"),
+        })
+        .optional()
+        .describe("Network configuration and security policies"),
     })
     .strict()
     .meta({
@@ -1425,6 +1434,14 @@ export namespace Config {
 
         const deps: Fiber.Fiber<void, never>[] = []
 
+        const canInstall = (cfg: Info) => {
+          const net = cfg.network
+          const host = "registry.npmjs.org"
+          if (!net || net.policy === "deny-all") return false
+          if (net.policy === "allow-all") return true
+          return (net.whitelist ?? []).some((item) => host === item || host.endsWith(`.${item}`))
+        }
+
         for (const dir of unique(directories)) {
           if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
             for (const file of ["opencode.json", "opencode.jsonc"]) {
@@ -1437,19 +1454,23 @@ export namespace Config {
             }
           }
 
-          const dep = yield* installDependencies(dir).pipe(
-            Effect.exit,
-            Effect.tap((exit) =>
-              Exit.isFailure(exit)
-                ? Effect.sync(() => {
-                    log.warn("background dependency install failed", { dir, error: String(exit.cause) })
-                  })
-                : Effect.void,
-            ),
-            Effect.asVoid,
-            Effect.forkScoped,
-          )
-          deps.push(dep)
+          if (canInstall(result)) {
+            const dep = yield* installDependencies(dir).pipe(
+              Effect.exit,
+              Effect.tap((exit) =>
+                Exit.isFailure(exit)
+                  ? Effect.sync(() => {
+                      log.warn("background dependency install failed", { dir, error: String(exit.cause) })
+                    })
+                  : Effect.void,
+              ),
+              Effect.asVoid,
+              Effect.forkScoped,
+            )
+            deps.push(dep)
+          } else {
+            log.debug("skipping dependency install due to network policy", { dir })
+          }
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => loadCommand(dir)))
           result.agent = mergeDeep(result.agent, yield* Effect.promise(() => loadAgent(dir)))

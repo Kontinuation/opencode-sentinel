@@ -409,9 +409,44 @@ export namespace LLM {
                 (ctrl) => Effect.sync(() => ctrl.abort()),
               )
 
-              const result = yield* run({ ...input, abort: ctrl.signal })
+              const attempt = (input: StreamInput) =>
+                Effect.gen(function* () {
+                  const result = yield* run({ ...input, abort: ctrl.signal })
+                  return Stream.fromAsyncIterable(result.fullStream, (e) =>
+                    e instanceof Error ? e : new Error(String(e)),
+                  )
+                })
 
-              return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
+              const cfg = yield* config.get()
+              return yield* attempt(input).pipe(
+                Effect.catch((error) => {
+                  if (!cfg.fallback_model) return Effect.fail(error)
+
+                  const { providerID, modelID } = Provider.parseModel(cfg.fallback_model)
+                  if (input.model.providerID === providerID && input.model.id === modelID) {
+                    log.warn("Fallback model failed (same as primary)", {
+                      model: input.model.id,
+                      error,
+                    })
+                    return Effect.fail(error)
+                  }
+
+                  return Effect.gen(function* () {
+                    log.warn("stream failed, attempting fallback", {
+                      model: input.model.id,
+                      fallback: cfg.fallback_model,
+                      error,
+                    })
+                    const fallback = yield* provider.getModel(providerID, modelID)
+                    return yield* attempt({ ...input, model: fallback })
+                  }).pipe(
+                    Effect.catch((fallbackError) => {
+                      log.error("fallback stream failed", { error: fallbackError })
+                      return Effect.fail(error)
+                    }),
+                  )
+                }),
+              )
             }),
           ),
         )

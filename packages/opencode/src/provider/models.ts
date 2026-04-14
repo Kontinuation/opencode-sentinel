@@ -5,6 +5,7 @@ import z from "zod"
 import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { lazy } from "@/util/lazy"
+import { NetworkPolicy } from "../security/network"
 import { Filesystem } from "../util/filesystem"
 import { Flock } from "@opencode-ai/shared/util/flock"
 import { Hash } from "@opencode-ai/shared/util/hash"
@@ -121,7 +122,19 @@ export namespace ModelsDev {
   }
 
   const fetchApi = async () => {
-    const result = await fetch(`${url()}/api.json`, {
+    const endpoint = `${url()}/api.json`
+    try {
+      const { AppRuntime } = await import("../effect/app-runtime")
+      const { Config } = await import("../config/config")
+      const cfg = await AppRuntime.runPromise(Config.Service.use((svc) => svc.get()))
+      if (!NetworkPolicy.isAccessAllowed(endpoint, cfg.network)) {
+        log.info("network access to models registry is denied by policy", { endpoint })
+        return { ok: false, text: "{}" }
+      }
+    } catch (e) {
+      // Ignore errors getting config during init
+    }
+    const result = await fetch(endpoint, {
       headers: { "User-Agent": Installation.USER_AGENT },
       signal: AbortSignal.timeout(10000),
     })

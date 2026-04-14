@@ -43,6 +43,14 @@
 
 ---
 
+## About This Fork
+
+This is **OpenCode Sentinel** — a continuously-rebased fork of [opencode](https://github.com/anomalyco/opencode) with air-gapped environment support. It adds network policy controls, offline deployment tooling, and fallback model configuration for use in corporate intranets and disconnected networks.
+
+See [doc/README.md](doc/README.md) for details.
+
+---
+
 ### Installation
 
 ```bash

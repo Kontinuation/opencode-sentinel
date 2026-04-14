@@ -29,3 +29,8 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Sentinel build artifacts
+offline-scripts/temp_build/
+offline-scripts/opencode-offline.tar.gz
+packages/opencode/.artifacts/
