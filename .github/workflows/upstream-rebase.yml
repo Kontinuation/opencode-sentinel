@@ -1,0 +1,106 @@
+name: Upstream Rebase
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Daily at midnight UTC
+  workflow_dispatch: # Manual trigger
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    if: github.repository == 'Kontinuation/opencode-sentinel'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode-bot"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/anomalyco/opencode.git
+
+      - name: Fetch upstream
+        run: git fetch upstream dev
+
+      - name: Create pre-rebase tag
+        run: |
+          TAG_NAME="pre-rebase-$(date +'%Y-%m-%d')"
+          git tag -f "$TAG_NAME"
+          git push origin "$TAG_NAME" --force
+
+      - name: Rebase
+        id: rebase
+        run: |
+          if ! git rebase upstream/dev; then
+            git rebase --abort
+            echo "conflict=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: bun typecheck
+
+      # - name: Test
+      #   run: bun turbo test:ci
+
+      - name: Build Offline Package
+        run: OPENCODE_CHANNEL=latest bun offline-scripts/pack.ts
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-offline-package
+          path: offline-scripts/opencode-offline.tar.gz
+
+      - name: Update tags and push
+        if: success()
+        run: |
+          git tag -f sentinel-patch
+          git push origin dev --force
+          git push origin sentinel-patch --force
+
+      - name: Cleanup old tags
+        if: always()
+        run: |
+          # Delete tags older than 30 days
+          CUTOFF_DATE=$(date -d "30 days ago" +%s)
+          git fetch --tags
+          for tag in $(git tag -l "pre-rebase-*"); do
+            # Extract date from tag pre-rebase-YYYY-MM-DD
+            tag_date=$(echo $tag | sed 's/pre-rebase-//')
+            # Use a more robust date conversion if possible
+            tag_timestamp=$(date -d "$tag_date" +%s 2>/dev/null || echo 0)
+            if [ "$tag_timestamp" -gt 0 ] && [ "$tag_timestamp" -lt "$CUTOFF_DATE" ]; then
+              echo "Deleting old tag $tag"
+              git tag -d "$tag"
+              git push origin --delete "$tag" || true
+            fi
+          done
+
+      - name: Open Issue on Failure
+        if: failure() && steps.rebase.outputs.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: "❌ Upstream Rebase Conflict",
+              body: "The daily rebase onto `anomalyco/opencode:dev` failed due to merge conflicts. Please resolve them manually."
+            })
