@@ -1,0 +1,45 @@
+name: dev-build
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Typecheck
+        run: bun typecheck
+
+      - name: Build Offline Package
+        if: github.event_name != 'pull_request'
+        run: OPENCODE_CHANNEL=latest bun offline-scripts/pack.ts
+
+      - name: Upload Artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-offline-package
+          path: offline-scripts/opencode-offline.tar.gz
